@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
         }
 
         button.setOnClickListener {
-            thread { connectAndSend("Hello ESP32!") }
+            thread { connectAndSend("Hello ESP32!\n") }
         }
     }
 
