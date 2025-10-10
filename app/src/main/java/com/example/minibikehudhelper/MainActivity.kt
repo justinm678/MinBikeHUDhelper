@@ -1,7 +1,6 @@
 package com.example.minibikehudhelper
 
 
-import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
@@ -13,46 +12,60 @@ import androidx.activity.ComponentActivity
 import androidx.core.app.ActivityCompat
 import java.io.IOException
 import java.util.*
+import java.util.concurrent.ConcurrentLinkedQueue
 
 class MainActivity : ComponentActivity() {
 
     private val ESP32_NAME = "ESP32_Bike"
     private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+    private var btSocket: BluetoothSocket? = null
+    private val messageQueue = ConcurrentLinkedQueue<String>()
+    @Volatile private var isConnected = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Button to send test message
         val button = Button(this)
-        button.text = "Send Test Message"
+        button.text = "Send Test"
         setContentView(button)
 
-        // Request Bluetooth permissions on Android 12+
+        // Request permissions for Android 12+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ActivityCompat.requestPermissions(
                 this,
-                arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN),
+                arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT, android.Manifest.permission.BLUETOOTH_SCAN),
                 1
             )
         }
 
+        // Connect in background
+        Thread { connectToESP32() }.start()
+
         button.setOnClickListener {
-            Thread { sendTestMessage("Hello ESP32!") }.start()
+            messageQueue.add("Hello ESP32!")
         }
+
+        // Background thread to send queued messages
+        Thread {
+            while (true) {
+                if (isConnected && btSocket != null && messageQueue.isNotEmpty()) {
+                    val msg = messageQueue.poll()
+                    try {
+                        btSocket?.outputStream?.write((msg + "\n").toByteArray())
+                    } catch (e: IOException) {
+                        e.printStackTrace()
+                        isConnected = false
+                        connectToESP32()
+                    }
+                }
+                Thread.sleep(50)
+            }
+        }.start()
     }
 
-    private fun sendTestMessage(message: String) {
-        val btAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
-        if (btAdapter == null) {
-            runOnUiThread {
-                Toast.makeText(this, "Bluetooth not supported", Toast.LENGTH_SHORT).show()
-            }
-            return
-        }
-
-        val device: BluetoothDevice? =
-            btAdapter.bondedDevices.firstOrNull { it.name == ESP32_NAME }
-
+    private fun connectToESP32() {
+        val btAdapter = BluetoothAdapter.getDefaultAdapter()
+        val device: BluetoothDevice? = btAdapter.bondedDevices.firstOrNull { it.name == ESP32_NAME }
         if (device == null) {
             runOnUiThread {
                 Toast.makeText(this, "ESP32 not paired", Toast.LENGTH_SHORT).show()
@@ -61,20 +74,16 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            val socket: BluetoothSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+            btSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
             btAdapter.cancelDiscovery()
-            socket.connect()
-            socket.outputStream.write((message + "\n").toByteArray())
-            socket.close()
-
+            btSocket?.connect()
+            isConnected = true
             runOnUiThread {
-                Toast.makeText(this, "Message sent!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Connected to ESP32", Toast.LENGTH_SHORT).show()
             }
         } catch (e: IOException) {
             e.printStackTrace()
-            runOnUiThread {
-                Toast.makeText(this, "Failed to send message", Toast.LENGTH_SHORT).show()
-            }
+            isConnected = false
         }
     }
 }
