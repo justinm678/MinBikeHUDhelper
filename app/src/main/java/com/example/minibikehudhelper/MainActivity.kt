@@ -1,6 +1,5 @@
 package com.example.minibikehudhelper
 
-
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -11,9 +10,9 @@ import android.widget.Button
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.app.ActivityCompat
+import kotlin.concurrent.thread
 import java.io.IOException
 import java.util.*
-import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
 
@@ -28,7 +27,7 @@ class MainActivity : ComponentActivity() {
         button.text = "Send Test Message"
         setContentView(button)
 
-        // Request permissions for Android 12+
+        // Request permissions on Android 12+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ActivityCompat.requestPermissions(
                 this,
@@ -38,21 +37,14 @@ class MainActivity : ComponentActivity() {
         }
 
         button.setOnClickListener {
-            thread { connectAndSend("Hello ESP32!\n") }
+            thread { connectAndSend("Hello ESP32!") }
         }
     }
 
     private fun createBluetoothSocket(device: BluetoothDevice): BluetoothSocket {
-        return try {
-            // Reflection method: forces channel 1
-            device.javaClass.getMethod(
-                "createRfcommSocket",
-                Int::class.javaPrimitiveType
-            ).invoke(device, 1) as BluetoothSocket
-        } catch (e: Exception) {
-            // fallback
-            device.createRfcommSocketToServiceRecord(SPP_UUID)
-        }
+        // Force channel 1 using reflection
+        return device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+            .invoke(device, 1) as BluetoothSocket
     }
 
     private fun connectAndSend(message: String) {
@@ -68,19 +60,24 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            val socket = createBluetoothSocket(device)
-            btAdapter.cancelDiscovery()
-            socket.connect()
-            socket.outputStream.write((message + "\n").toByteArray())
-            socket.close()
+            btAdapter.cancelDiscovery() // cancel discovery BEFORE connecting
+            btSocket = createBluetoothSocket(device)
+
+            btSocket!!.connect() // connect
+            Thread.sleep(100)    // small delay to ensure ESP32 is ready
+
+            btSocket!!.outputStream.write((message + "\n").toByteArray()) // send message
+            Thread.sleep(100) // give ESP32 time to read
 
             runOnUiThread {
-                Toast.makeText(this, "Connected and sent message!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Message sent!", Toast.LENGTH_SHORT).show()
             }
+
+            btSocket!!.close() // close after sending
         } catch (e: IOException) {
             e.printStackTrace()
             runOnUiThread {
-                Toast.makeText(this, "Failed to connect or send", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Failed to connect/send", Toast.LENGTH_SHORT).show()
             }
         }
     }
