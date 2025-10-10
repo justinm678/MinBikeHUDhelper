@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.example.minibikehudhelper"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.minibikehudhelper"
