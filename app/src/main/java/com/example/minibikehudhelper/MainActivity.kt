@@ -1,6 +1,7 @@
 package com.example.minibikehudhelper
 
 
+import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
@@ -12,60 +13,53 @@ import androidx.activity.ComponentActivity
 import androidx.core.app.ActivityCompat
 import java.io.IOException
 import java.util.*
-import java.util.concurrent.ConcurrentLinkedQueue
+import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
 
     private val ESP32_NAME = "ESP32_Bike"
     private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
     private var btSocket: BluetoothSocket? = null
-    private val messageQueue = ConcurrentLinkedQueue<String>()
-    @Volatile private var isConnected = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val button = Button(this)
-        button.text = "Send Test"
+        button.text = "Send Test Message"
         setContentView(button)
 
         // Request permissions for Android 12+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ActivityCompat.requestPermissions(
                 this,
-                arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT, android.Manifest.permission.BLUETOOTH_SCAN),
+                arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN),
                 1
             )
         }
 
-        // Connect in background
-        Thread { connectToESP32() }.start()
-
         button.setOnClickListener {
-            messageQueue.add("Hello ESP32!")
+            thread { connectAndSend("Hello ESP32!") }
         }
-
-        // Background thread to send queued messages
-        Thread {
-            while (true) {
-                if (isConnected && btSocket != null && messageQueue.isNotEmpty()) {
-                    val msg = messageQueue.poll()
-                    try {
-                        btSocket?.outputStream?.write((msg + "\n").toByteArray())
-                    } catch (e: IOException) {
-                        e.printStackTrace()
-                        isConnected = false
-                        connectToESP32()
-                    }
-                }
-                Thread.sleep(50)
-            }
-        }.start()
     }
 
-    private fun connectToESP32() {
+    private fun createBluetoothSocket(device: BluetoothDevice): BluetoothSocket {
+        return try {
+            // Reflection method: forces channel 1
+            device.javaClass.getMethod(
+                "createRfcommSocket",
+                Int::class.javaPrimitiveType
+            ).invoke(device, 1) as BluetoothSocket
+        } catch (e: Exception) {
+            // fallback
+            device.createRfcommSocketToServiceRecord(SPP_UUID)
+        }
+    }
+
+    private fun connectAndSend(message: String) {
         val btAdapter = BluetoothAdapter.getDefaultAdapter()
-        val device: BluetoothDevice? = btAdapter.bondedDevices.firstOrNull { it.name == ESP32_NAME }
+        val device: BluetoothDevice? =
+            btAdapter.bondedDevices.firstOrNull { it.name == ESP32_NAME }
+
         if (device == null) {
             runOnUiThread {
                 Toast.makeText(this, "ESP32 not paired", Toast.LENGTH_SHORT).show()
@@ -74,16 +68,20 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            btSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+            val socket = createBluetoothSocket(device)
             btAdapter.cancelDiscovery()
-            btSocket?.connect()
-            isConnected = true
+            socket.connect()
+            socket.outputStream.write((message + "\n").toByteArray())
+            socket.close()
+
             runOnUiThread {
-                Toast.makeText(this, "Connected to ESP32", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Connected and sent message!", Toast.LENGTH_SHORT).show()
             }
         } catch (e: IOException) {
             e.printStackTrace()
-            isConnected = false
+            runOnUiThread {
+                Toast.makeText(this, "Failed to connect or send", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 }
