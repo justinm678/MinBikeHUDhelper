@@ -4,9 +4,14 @@ import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
+import android.content.ComponentName
+import android.content.Intent
+import android.provider.Settings
+import android.service.notification.NotificationListenerService
 import android.os.Build
 import android.os.Bundle
 import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.app.ActivityCompat
@@ -17,18 +22,23 @@ import java.util.*
 class MainActivity : ComponentActivity() {
 
     private val ESP32_NAME = "ESP32_Bike"
-    private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-    private var btSocket: BluetoothSocket? = null
-    private var counter = 0  // 🔢 added counter
+    private var counter = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val button = Button(this)
-        button.text = "Send Increasing Number"
-        setContentView(button)
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
 
-        // Request permissions on Android 12+
+        val testButton = Button(this).apply { text = "Send Test Message" }
+        val notifButton = Button(this).apply { text = "Enable Notification Access" }
+
+        layout.addView(testButton)
+        layout.addView(notifButton)
+        setContentView(layout)
+
+        // Request Bluetooth permissions on Android 12+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ActivityCompat.requestPermissions(
                 this,
@@ -40,21 +50,19 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        button.setOnClickListener {
-            // Increment and send the new number
-            val message = "Count: ${counter++}"
-            thread { connectAndSend(message) }
+        notifButton.setOnClickListener {
+            // Opens system settings so you can enable your app for notification access
+            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            startActivity(intent)
+        }
+
+        testButton.setOnClickListener {
+            val message = "Test #${counter++}"
+            thread { sendOnceReliable(message) }
         }
     }
 
-    private fun createBluetoothSocket(device: BluetoothDevice): BluetoothSocket {
-        // Force channel 1 using reflection
-        return device.javaClass
-            .getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
-            .invoke(device, 1) as BluetoothSocket
-    }
-
-    private fun connectAndSend(message: String) {
+    private fun sendOnceReliable(message: String) {
         val btAdapter = BluetoothAdapter.getDefaultAdapter()
         val device: BluetoothDevice? =
             btAdapter.bondedDevices.firstOrNull { it.name == ESP32_NAME }
@@ -66,30 +74,31 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        var socket: BluetoothSocket? = null
         try {
             btAdapter.cancelDiscovery()
-            btSocket = createBluetoothSocket(device)
-            Thread.sleep(200) // brief pause before connect
+            socket = device.javaClass
+                .getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                .invoke(device, 1) as BluetoothSocket
 
-            btSocket!!.connect()
-            Thread.sleep(200) // brief pause to stabilize connection
+            Thread.sleep(150)
+            socket.connect()
+            Thread.sleep(200)
 
-            val out = btSocket!!.outputStream
-            out.write((message + "\n").toByteArray())
-            out.flush()
+            socket.outputStream.write((message + "\n").toByteArray())
+            socket.outputStream.flush()
 
-            Thread.sleep(200) // allow ESP32 time to read
+            Thread.sleep(200)
             runOnUiThread {
                 Toast.makeText(this, "Sent: $message", Toast.LENGTH_SHORT).show()
             }
-
         } catch (e: IOException) {
             e.printStackTrace()
             runOnUiThread {
                 Toast.makeText(this, "Failed to send: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         } finally {
-            try { btSocket?.close() } catch (_: Exception) {}
+            try { socket?.close() } catch (_: Exception) {}
         }
     }
 }

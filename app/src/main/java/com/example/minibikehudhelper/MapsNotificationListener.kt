@@ -10,49 +10,66 @@ import java.util.*
 
 class MapsNotificationListener : NotificationListenerService() {
 
-    private var btAdapter: BluetoothAdapter? = null
-    private var btSocket: BluetoothSocket? = null
     private val ESP32_NAME = "ESP32_Bike"
-    private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB") // Standard SPP
+    private var btAdapter: BluetoothAdapter? = null
 
     override fun onCreate() {
         super.onCreate()
         btAdapter = BluetoothAdapter.getDefaultAdapter()
-
-        // Connect in a background thread
-        Thread { connectToESP32() }.start()
+        Log.d("BikeHUD", "MapsNotificationListener started")
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (sbn.packageName == "com.google.android.apps.maps") {
-            val text = sbn.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
-            text?.let { sendToESP32(it) }
-        }
+        if (sbn.packageName != "com.google.android.apps.maps") return
+
+        val extras = sbn.notification.extras
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+
+        // Only react to navigation updates, not general Maps notifications
+        if (text.isNullOrBlank()) return
+        if (!text.contains("•") && !text.contains(" mi") && !text.contains(" ft") && !text.contains(" km"))
+            return
+
+        val message = "$title: $text"
+        Log.d("BikeHUD", "Maps message: $message")
+
+        Thread { sendOnceReliable(message) }.start()
     }
 
-    private fun connectToESP32() {
-        try {
-            val pairedDevices = btAdapter?.bondedDevices
-            val device = pairedDevices?.firstOrNull { it.name == ESP32_NAME }
-            device?.let {
-                btSocket = it.createRfcommSocketToServiceRecord(SPP_UUID)
-                btAdapter?.cancelDiscovery()
-                btSocket?.connect()
-                Log.d("BT", "Connected to ESP32")
-            }
-        } catch (e: IOException) {
-            Log.e("BT", "Connection failed", e)
-        }
-    }
+    private fun sendOnceReliable(message: String) {
+        val adapter = btAdapter ?: return
+        val device = adapter.bondedDevices.firstOrNull { it.name == ESP32_NAME }
 
-    private fun sendToESP32(message: String) {
+        if (device == null) {
+            Log.e("BikeHUD", "ESP32 not paired!")
+            return
+        }
+
+        var socket: BluetoothSocket? = null
         try {
-            if (btSocket?.isConnected == true) {
-                val outStream = btSocket?.outputStream
-                outStream?.write((message + "\n").toByteArray())
-            }
+            adapter.cancelDiscovery()
+            socket = device.javaClass
+                .getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                .invoke(device, 1) as BluetoothSocket
+
+            Thread.sleep(150) // Let radio settle
+            socket.connect()
+            Thread.sleep(200) // Let link stabilize
+
+            val out = socket.outputStream
+            out.write((message + "\n").toByteArray())
+            out.flush()
+
+            Thread.sleep(200) // Give ESP32 time to read before closing
+            Log.d("BikeHUD", "Sent to ESP32: $message")
+
         } catch (e: IOException) {
-            Log.e("BT", "Send failed", e)
+            Log.e("BikeHUD", "Send failed", e)
+        } catch (e: Exception) {
+            Log.e("BikeHUD", "Unexpected error", e)
+        } finally {
+            try { socket?.close() } catch (_: Exception) {}
         }
     }
 }
