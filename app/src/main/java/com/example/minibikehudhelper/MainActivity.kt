@@ -62,13 +62,13 @@ class MainActivity : ComponentActivity() {
         try {
             btAdapter.cancelDiscovery() // cancel discovery BEFORE connecting
             btSocket = createBluetoothSocket(device)
-            Thread.sleep(100)    // small delay to ensure ESP32 is ready
+            Thread.sleep(300)    // small delay to ensure ESP32 is ready
 
             runOnUiThread {
                 Toast.makeText(this, "socket created!", Toast.LENGTH_SHORT).show()
             }
             btSocket!!.connect() // connect
-            Thread.sleep(200)    // small delay to ensure ESP32 is ready
+            Thread.sleep(300)    // small delay to ensure ESP32 is ready
 
             runOnUiThread {
                 Toast.makeText(this, "socket connected!", Toast.LENGTH_SHORT).show()
@@ -86,6 +86,11 @@ class MainActivity : ComponentActivity() {
             runOnUiThread {
                 Toast.makeText(this, "Failed to connect/send", Toast.LENGTH_SHORT).show()
             }
+        } finally {
+            // ✅ always close in finally, even on error
+            try {
+                btSocket?.close()
+            } catch (_: Exception) { }
         }
     }
 }
