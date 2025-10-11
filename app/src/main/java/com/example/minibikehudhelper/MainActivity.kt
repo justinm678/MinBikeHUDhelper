@@ -62,12 +62,19 @@ class MainActivity : ComponentActivity() {
         try {
             btAdapter.cancelDiscovery() // cancel discovery BEFORE connecting
             btSocket = createBluetoothSocket(device)
-
-            btSocket!!.connect() // connect
             Thread.sleep(100)    // small delay to ensure ESP32 is ready
 
+            runOnUiThread {
+                Toast.makeText(this, "socket created!", Toast.LENGTH_SHORT).show()
+            }
+            btSocket!!.connect() // connect
+            Thread.sleep(200)    // small delay to ensure ESP32 is ready
+
+            runOnUiThread {
+                Toast.makeText(this, "socket connected!", Toast.LENGTH_SHORT).show()
+            }
             btSocket!!.outputStream.write((message + "\n").toByteArray()) // send message
-            Thread.sleep(100) // give ESP32 time to read
+            Thread.sleep(300) // give ESP32 time to read
 
             runOnUiThread {
                 Toast.makeText(this, "Message sent!", Toast.LENGTH_SHORT).show()
