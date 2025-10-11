@@ -19,31 +19,38 @@ class MainActivity : ComponentActivity() {
     private val ESP32_NAME = "ESP32_Bike"
     private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
     private var btSocket: BluetoothSocket? = null
+    private var counter = 0  // 🔢 added counter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val button = Button(this)
-        button.text = "Send Test Message"
+        button.text = "Send Increasing Number"
         setContentView(button)
 
         // Request permissions on Android 12+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ActivityCompat.requestPermissions(
                 this,
-                arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN),
+                arrayOf(
+                    Manifest.permission.BLUETOOTH_CONNECT,
+                    Manifest.permission.BLUETOOTH_SCAN
+                ),
                 1
             )
         }
 
         button.setOnClickListener {
-            thread { connectAndSend("Hello ESP32!") }
+            // Increment and send the new number
+            val message = "Count: ${counter++}"
+            thread { connectAndSend(message) }
         }
     }
 
     private fun createBluetoothSocket(device: BluetoothDevice): BluetoothSocket {
         // Force channel 1 using reflection
-        return device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+        return device.javaClass
+            .getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
             .invoke(device, 1) as BluetoothSocket
     }
 
@@ -60,37 +67,29 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            btAdapter.cancelDiscovery() // cancel discovery BEFORE connecting
+            btAdapter.cancelDiscovery()
             btSocket = createBluetoothSocket(device)
-            Thread.sleep(300)    // small delay to ensure ESP32 is ready
+            Thread.sleep(200) // brief pause before connect
 
-            runOnUiThread {
-                Toast.makeText(this, "socket created!", Toast.LENGTH_SHORT).show()
-            }
-            btSocket!!.connect() // connect
-            Thread.sleep(300)    // small delay to ensure ESP32 is ready
+            btSocket!!.connect()
+            Thread.sleep(200) // brief pause to stabilize connection
 
-            runOnUiThread {
-                Toast.makeText(this, "socket connected!", Toast.LENGTH_SHORT).show()
-            }
-            btSocket!!.outputStream.write((message + "\n").toByteArray()) // send message
-            Thread.sleep(300) // give ESP32 time to read
+            val out = btSocket!!.outputStream
+            out.write((message + "\n").toByteArray())
+            out.flush()
 
+            Thread.sleep(200) // allow ESP32 time to read
             runOnUiThread {
-                Toast.makeText(this, "Message sent!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Sent: $message", Toast.LENGTH_SHORT).show()
             }
 
-            btSocket!!.close() // close after sending
         } catch (e: IOException) {
             e.printStackTrace()
             runOnUiThread {
-                Toast.makeText(this, "Failed to connect/send", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Failed to send: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         } finally {
-            // ✅ always close in finally, even on error
-            try {
-                btSocket?.close()
-            } catch (_: Exception) { }
+            try { btSocket?.close() } catch (_: Exception) {}
         }
     }
 }
